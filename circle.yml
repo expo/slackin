@@ -1,0 +1,61 @@
+machine:
+  pre:
+    - curl -sSL https://s3.amazonaws.com/circle-downloads/install-circleci-docker.sh | bash -s -- 1.10.0
+  environment:
+    # Through CircleCI, define AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+    AWS_ACCOUNT_ID: '274251141632'
+    AWS_DEFAULT_REGION: us-west-1
+    CONTAINER_REGISTRY: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+    CONTAINER_REPOSITORY: $CONTAINER_REGISTRY/slackin
+    CONTAINER_IMAGE: $CONTAINER_REPOSITORY:$CIRCLE_SHA1
+    DOCKERRUN_FILE: Dockerrun-${CIRCLE_SHA1}.aws.json
+    S3_BUCKET: elasticbeanstalk-${AWS_DEFAULT_REGION}-${AWS_ACCOUNT_ID}
+    SLACK_API_TOKEN: $SLACK_API_TOKEN
+    SLACK_SUBDOMAIN: exponentjs
+  services:
+    - docker
+
+branches:
+  only:
+    - release
+
+dependencies:
+  cache_directories:
+    - /tmp/docker
+  override:
+    - >
+      if [[ -e /tmp/docker/image.tar ]]; then
+        docker load -i /tmp/docker/image.tar
+      fi
+    - >
+      docker build
+      -t $CONTAINER_IMAGE
+      --build-arg SLACK_API_TOKEN=${SLACK_API_TOKEN}
+      --build-arg SLACK_SUBDOMAIN=${SLACK_SUBDOMAIN}
+      .
+    - mkdir -p /tmp/docker
+    - docker save $CONTAINER_IMAGE > /tmp/docker/image.tar
+
+test:
+  override:
+    - exit 0
+
+deployment:
+  production:
+    branch: release
+    owner: exponent
+    commands:
+      - sudo pip install -U awscli
+      - eval $(aws ecr get-login)
+      - docker push $CONTAINER_IMAGE
+      - envsubst < Dockerrun.aws.template.json > $DOCKERRUN_FILE
+      - aws s3 cp $DOCKERRUN_FILE s3://$S3_BUCKET/dockerrun/
+      - >
+        aws elasticbeanstalk create-application-version
+        --application-name 'Exponent Slack'
+        --version-label $CIRCLE_SHA1
+        --source-bundle S3Bucket=$S3_BUCKET,S3Key=dockerrun/$DOCKERRUN_FILE
+      - >
+        aws elasticbeanstalk update-environment
+        --environment-name exponent-slack
+        --version-label $CIRCLE_SHA1
