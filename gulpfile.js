@@ -1,6 +1,6 @@
-import gulp from 'gulp'
-import babel from 'gulp-babel'
-import rimraf from 'gulp-rimraf'
+const gulp = require('gulp')
+const babel = require('gulp-babel')
+const rimraf = require('gulp-rimraf')
 
 const paths = {
   in: {
